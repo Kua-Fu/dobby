@@ -265,13 +265,15 @@ function App() {
                                     />
                                 </div>
                             ) : (
-                                <ImageEditor
-                                    ref={editorRef}
-                                    image={activeFile}
-                                    onProcess={processImageNormal}
-                                    isProcessing={isProcessing}
-                                    brushSize={brushSize}
-                                />
+                                <div className="image-container" style={{ transform: `scale(${zoomScale})`, transformOrigin: 'top center' }}>
+                                    <ImageEditor
+                                        ref={editorRef}
+                                        image={activeFile}
+                                        onProcess={processImageNormal}
+                                        isProcessing={isProcessing}
+                                        brushSize={brushSize}
+                                    />
+                                </div>
                             )}
                         </div>
                     )}

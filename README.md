@@ -1,5 +1,7 @@
 # PureClear AI - 智能水印去除工具
 
+![Product Showcase](docs/product_showcase.png)
+
 PureClear AI 是一款功能强大的本地化图片去水印工具，结合了最新的计算机视觉和深度学习技术，提供从手动涂抹到全自动 AI 识别的多种解决方案。它不仅支持普通图片，还能完美处理带有**透明背景 (Alpha 通道)** 的图片。
 
 ## ✨ 核心功能
