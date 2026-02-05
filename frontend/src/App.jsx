@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import ImageEditor from './components/ImageEditor';
 import { Upload, Download, RefreshCw, Sparkles } from 'lucide-react';
+import logo from './assets/logo.png';
 
 function App() {
     const [activeFile, setActiveFile] = useState(null); // Current working file
@@ -222,8 +223,11 @@ function App() {
     return (
         <div className="container">
             <header>
-                <h1>PureClear AI</h1>
-                <p className="subtitle">利用智能算法，轻松去除图片水印</p>
+                <div className="brand-header">
+                    <img src={logo} alt="Dobby Logo" className="logo" />
+                    <h1>Dobby 多比</h1>
+                </div>
+                <p className="subtitle">您的智能图片修复小精灵</p>
                 <div className="ai-toggle-wrapper">
                     <span className={!isAiMode ? 'active' : ''}>普通模式</span>
                     <label className="switch">
@@ -471,7 +475,7 @@ function App() {
             </main>
 
             <footer style={{ marginTop: '4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                <p>© 2026 PureClear AI. 由 OpenCV 驱动</p>
+                <p>© 2026 Dobby 多比. 由 OpenCV & AI 驱动</p>
             </footer>
         </div>
     );
