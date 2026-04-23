@@ -1,8 +1,9 @@
 fastapi
 uvicorn
 python-multipart
-opencv-python-headless
-numpy
+opencv-python<4.11
+opencv-python-headless<4.11
+numpy<2
 pillow
 iopaint
 torch
@@ -12,6 +13,6 @@ easyocr
 transformers
 einops
 timm
-git+https://github.com/facebookresearch/sam2.git
+# git+https://github.com/facebookresearch/sam2.git # Not supported on Intel Mac due to torch>=2.5.1 requirement
 diffusers
 accelerate

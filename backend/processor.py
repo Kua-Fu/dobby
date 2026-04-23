@@ -12,6 +12,9 @@ ocr_reader = None
 florence_model = None
 florence_processor = None
 sam_predictor = None
+sam_predictor_attempted = False
+background_remover = None
+background_remover_attempted = False
 
 def get_model():
     global model_manager
@@ -29,9 +32,31 @@ def get_model():
             model_manager = None
     return model_manager
 
+def get_background_remover():
+    """Initialize the background remover for transparent PNG export."""
+    global background_remover, background_remover_attempted
+    if background_remover_attempted:
+        return background_remover
+
+    background_remover_attempted = True
+    try:
+        from iopaint.plugins.briarmbg import create_briarmbg_session
+
+        print("Loading BRIA RMBG model on cpu...")
+        background_remover = create_briarmbg_session()
+        print("BRIA RMBG initialized successfully")
+    except Exception as e:
+        print(f"Warning: Could not initialize background remover: {e}")
+        background_remover = None
+    return background_remover
+
 def get_sam_predictor():
     """Initialize SAM 2 predictor for precise masking"""
-    global sam_predictor
+    global sam_predictor, sam_predictor_attempted
+    if sam_predictor_attempted:
+        return sam_predictor
+
+    sam_predictor_attempted = True
     if sam_predictor is None:
         try:
             from sam2.build_sam import build_sam2
@@ -143,34 +168,54 @@ def detect_watermarks_florence(img):
         # Convert to PIL for Florence
         pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        # Florence-2 task for object detection/watermark detection
-        # Using a generic phrase to detect watermarks or logos
-        prompt = "<OD>watermark, logo, text, stamp"
-        
-        inputs = processor(text=prompt, images=pil_img, return_tensors="pt").to(device)
-        generated_ids = model.generate(
-            input_ids=inputs["input_ids"],
-            pixel_values=inputs["pixel_values"],
-            max_new_tokens=1024,
-            do_sample=False,
-            num_beams=3
-        )
-        generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-        parsed_answer = processor.post_process_generation(generated_text, task=prompt, image_size=(pil_img.width, pil_img.height))
-        
-        # Parse OD results
-        if prompt in parsed_answer:
-            bboxes = parsed_answer[prompt]['bboxes']
-            for bbox in bboxes:
+
+        # Florence-2 requires the task token to be used by itself.
+        # To detect watermark-like objects, query a few likely categories via
+        # open-vocabulary detection and merge the resulting regions.
+        task_token = "<OPEN_VOCABULARY_DETECTION>"
+        queries = ["watermark", "logo", "stamp", "text"]
+
+        for query in queries:
+            prompt = f"{task_token}{query}"
+            inputs = processor(text=prompt, images=pil_img, return_tensors="pt").to(device)
+            generated_ids = model.generate(
+                input_ids=inputs["input_ids"],
+                pixel_values=inputs["pixel_values"],
+                max_new_tokens=1024,
+                do_sample=False,
+                num_beams=3
+            )
+            generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+            parsed_answer = processor.post_process_generation(
+                generated_text,
+                task=task_token,
+                image_size=(pil_img.width, pil_img.height)
+            )
+
+            if task_token not in parsed_answer:
+                continue
+
+            result = parsed_answer[task_token]
+
+            for bbox in result.get("bboxes", []):
                 x1, y1, x2, y2 = map(int, bbox)
-                # Expand slightly
                 x1 = max(0, x1 - 10)
                 y1 = max(0, y1 - 10)
                 x2 = min(w, x2 + 10)
                 y2 = min(h, y2 + 10)
                 cv2.rectangle(mask, (x1, y1), (x2, y2), 255, -1)
-                
+
+            for polygons in result.get("polygons", []):
+                for polygon in polygons:
+                    points = np.array(polygon, dtype=np.int32)
+                    if points.ndim == 2 and len(points) >= 3:
+                        cv2.fillPoly(mask, [points], 255)
+
+        coverage = np.sum(mask > 0) / mask.size
+        if coverage > 0.5:
+            print(f"Florence mask too large ({coverage * 100:.2f}%), falling back")
+            return None
+
         return mask
     except Exception as e:
         print(f"Florence detection failed: {e}")
@@ -391,3 +436,42 @@ def resize_image(image_bytes, scale=None, width=None, height=None):
     is_success, buffer = cv2.imencode(".png", resized)
     return io.BytesIO(buffer).read()
 
+def make_background_transparent(image_bytes):
+    """
+    Remove the image background and return a transparent PNG.
+    Preserves any existing alpha by combining it with the generated mask.
+    """
+    session = get_background_remover()
+    if session is None:
+        raise RuntimeError("背景透明化模型初始化失败，请稍后重试。")
+
+    from iopaint.plugins.briarmbg import briarmbg_process
+
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+
+    if img is None:
+        raise ValueError("Could not decode image")
+
+    existing_alpha = None
+    if len(img.shape) == 2:
+        bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    elif img.shape[2] == 4:
+        bgr = img[:, :, :3]
+        existing_alpha = img[:, :, 3]
+    else:
+        bgr = img
+
+    raw_result = briarmbg_process(bgr, session, only_mask=False)
+    rgba_result = cv2.cvtColor(raw_result, cv2.COLOR_BGRA2RGBA)
+
+    if existing_alpha is not None:
+        result_alpha = rgba_result[:, :, 3].astype(np.float32) / 255.0
+        original_alpha = existing_alpha.astype(np.float32) / 255.0
+        combined_alpha = np.clip(result_alpha * original_alpha * 255.0, 0, 255).astype(np.uint8)
+        rgba_result[:, :, 3] = combined_alpha
+
+    is_success, buffer = cv2.imencode(".png", cv2.cvtColor(rgba_result, cv2.COLOR_RGBA2BGRA))
+    if not is_success:
+        raise ValueError("Could not encode transparent PNG")
+    return io.BytesIO(buffer).read()

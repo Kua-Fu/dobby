@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
 import ImageEditor from './components/ImageEditor';
-import { Upload, Download, RefreshCw, Sparkles } from 'lucide-react';
+import WechatStickerMaker from './components/WechatStickerMaker';
+import { Upload, Download, RefreshCw, Layers } from 'lucide-react';
 import logo from './assets/logo.png';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+
 function App() {
+    const [toolMode, setToolMode] = useState('repair'); // 'repair' or 'wechat'
     const [activeFile, setActiveFile] = useState(null); // Current working file
     const [originalImage, setOriginalImage] = useState(null); // Backup for reset
     const [resultImage, setResultImage] = useState(null); // Display URL
@@ -65,7 +69,7 @@ function App() {
         formData.append('quality', quality);
 
         try {
-            const response = await fetch('http://localhost:8000/remove-watermark', {
+            const response = await fetch(`${API_BASE_URL}/remove-watermark`, {
                 method: 'POST',
                 body: formData,
             });
@@ -98,7 +102,7 @@ function App() {
         formData.append('mode', 'simple');
 
         try {
-            const response = await fetch('http://localhost:8000/remove-watermark', {
+            const response = await fetch(`${API_BASE_URL}/remove-watermark`, {
                 method: 'POST',
                 body: formData,
             });
@@ -172,7 +176,7 @@ function App() {
                 formData.append('height', targetHeight);
             }
 
-            const response = await fetch('http://127.0.0.1:8000/resize-image', {
+            const response = await fetch(`${API_BASE_URL}/resize-image`, {
                 method: 'POST',
                 body: formData,
             });
@@ -185,6 +189,38 @@ function App() {
             } else {
                 console.error('Resize failed');
                 alert('调整尺寸失败，请重试');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('服务器连接失败');
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const makeTransparentBackground = async () => {
+        if (!activeFile) return;
+        setIsProcessing(true);
+        setProcessingTime(null);
+        const startTime = performance.now();
+
+        try {
+            const formData = new FormData();
+            formData.append('image', activeFile);
+
+            const response = await fetch(`${API_BASE_URL}/make-transparent-background`, {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (response.ok) {
+                const blob = await response.blob();
+                setActiveFile(blob);
+                const endTime = performance.now();
+                setProcessingTime(Math.round(endTime - startTime));
+            } else {
+                const errorText = await response.text();
+                alert(errorText || '透明背景处理失败，请重试');
             }
         } catch (error) {
             console.error('Error:', error);
@@ -227,252 +263,286 @@ function App() {
                     <img src={logo} alt="Dobby Logo" className="logo" />
                     <h1>Dobby 多比</h1>
                 </div>
-                <p className="subtitle">您的智能图片修复小精灵</p>
-                <div className="ai-toggle-wrapper">
-                    <span className={!isAiMode ? 'active' : ''}>普通模式</span>
-                    <label className="switch">
-                        <input
-                            type="checkbox"
-                            checked={isAiMode}
-                            onChange={(e) => setIsAiMode(e.target.checked)}
-                        />
-                        <span className="slider round"></span>
-                    </label>
-                    <span className={isAiMode ? 'active' : ''}>AI 高级模式</span>
+                <p className="subtitle">
+                    {toolMode === 'repair'
+                        ? '您的智能图片修复小精灵'
+                        : '批量生成微信表情包素材，一次导出多种规格'}
+                </p>
+                <div className="tool-tabs">
+                    <button
+                        type="button"
+                        className={`tool-tab ${toolMode === 'repair' ? 'active' : ''}`}
+                        onClick={() => setToolMode('repair')}
+                    >
+                        图片修复
+                    </button>
+                    <button
+                        type="button"
+                        className={`tool-tab ${toolMode === 'wechat' ? 'active' : ''}`}
+                        onClick={() => setToolMode('wechat')}
+                    >
+                        微信表情包制作
+                    </button>
                 </div>
+                {toolMode === 'repair' && (
+                    <div className="ai-toggle-wrapper">
+                        <span className={!isAiMode ? 'active' : ''}>普通模式</span>
+                        <label className="switch">
+                            <input
+                                type="checkbox"
+                                checked={isAiMode}
+                                onChange={(e) => setIsAiMode(e.target.checked)}
+                            />
+                            <span className="slider round"></span>
+                        </label>
+                        <span className={isAiMode ? 'active' : ''}>AI 高级模式</span>
+                    </div>
+                )}
             </header>
 
-            <main className="editor-layout">
-                <div className="left-panel">
-                    {!activeFile ? (
-                        <label className="upload-card">
-                            <input type="file" hidden onChange={handleUpload} accept="image/*" />
-                            <Upload size={48} color="#6366f1" style={{ marginBottom: '1rem' }} />
-                            <h3>上传图片</h3>
-                            <p className="subtitle">点击或拖拽图片到此处</p>
-                        </label>
-                    ) : (
-                        <div className="image-viewport">
-                            <div className="zoom-controls">
-                                <button onClick={() => handleZoom(-0.1)}>-</button>
-                                <span>比例: {Math.round(zoomScale * 100)}%</span>
-                                <button onClick={() => handleZoom(0.1)}>+</button>
-                                <button onClick={resetZoom} className="btn-small">重置比例</button>
-                            </div>
-
-                            {isAiMode ? (
-                                <div className="image-container" style={{ transform: `scale(${zoomScale})`, transformOrigin: 'top center' }}>
-                                    <img
-                                        src={resultImage}
-                                        alt="Current"
-                                        className="preview-image"
-                                    />
-                                </div>
-                            ) : (
-                                <div className="image-container" style={{ transform: `scale(${zoomScale})`, transformOrigin: 'top center' }}>
-                                    <ImageEditor
-                                        ref={editorRef}
-                                        image={activeFile}
-                                        onProcess={processImageNormal}
-                                        isProcessing={isProcessing}
-                                        brushSize={brushSize}
-                                    />
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                {activeFile && (
-                    <div className="right-panel">
-                        <div className="options-group">
-                            <h4>处理模式</h4>
-                            <div className="ai-toggle-wrapper sidebar-toggle">
-                                <span className={!isAiMode ? 'active' : ''}>基础模式</span>
-                                <label className="switch">
-                                    <input
-                                        type="checkbox"
-                                        checked={isAiMode}
-                                        onChange={(e) => setIsAiMode(e.target.checked)}
-                                    />
-                                    <span className="slider round"></span>
-                                </label>
-                                <span className={isAiMode ? 'active' : ''}>AI 加速</span>
-                            </div>
-                        </div>
-
-                        {!isAiMode && (
-                            <div className="options-group">
-                                <h4>画笔设置</h4>
-                                <div className="brush-size">
-                                    <input
-                                        type="range"
-                                        min="5"
-                                        max="100"
-                                        value={brushSize}
-                                        onChange={(e) => setBrushSize(parseInt(e.target.value))}
-                                    />
-                                    <span className="hint-text">{brushSize}px</span>
-                                </div>
-                            </div>
-                        )}
-
-                        {isAiMode && (
-                            <>
-                                <div className="options-group">
-                                    <h4>检测算法</h4>
-                                    <div className="sub-mode-selector vertical">
-                                        <button
-                                            className={`sub-mode-btn ${subMode === 'text' ? 'active' : ''}`}
-                                            onClick={() => setSubMode('text')}
-                                        >
-                                            文本检测 (EasyOCR)
-                                        </button>
-                                        <button
-                                            className={`sub-mode-btn ${subMode === 'smart' ? 'active' : ''}`}
-                                            onClick={() => setSubMode('smart')}
-                                        >
-                                            智能检测 (Florence-2)
-                                        </button>
-                                    </div>
+            {toolMode === 'repair' ? (
+                <main className="editor-layout">
+                    <div className="left-panel">
+                        {!activeFile ? (
+                            <label className="upload-card">
+                                <input type="file" hidden onChange={handleUpload} accept="image/*" />
+                                <Upload size={48} color="#6366f1" style={{ marginBottom: '1rem' }} />
+                                <h3>上传图片</h3>
+                                <p className="subtitle">点击或拖拽图片到此处</p>
+                            </label>
+                        ) : (
+                            <div className="image-viewport">
+                                <div className="zoom-controls">
+                                    <button onClick={() => handleZoom(-0.1)}>-</button>
+                                    <span>比例: {Math.round(zoomScale * 100)}%</span>
+                                    <button onClick={() => handleZoom(0.1)}>+</button>
+                                    <button onClick={resetZoom} className="btn-small">重置比例</button>
                                 </div>
 
-                                <div className="options-group">
-                                    <h4>修复质量</h4>
-                                    <div className="quality-options">
-                                        <button
-                                            className={`quality-btn ${quality === 'standard' ? 'active' : ''}`}
-                                            onClick={() => setQuality('standard')}
-                                        >
-                                            标准
-                                        </button>
-                                        <button
-                                            className={`quality-btn ${quality === 'ultra' ? 'active' : ''}`}
-                                            onClick={() => setQuality('ultra')}
-                                        >
-                                            极致 (SAM 2)
-                                        </button>
-                                    </div>
-                                    <p className="hint-text">
-                                        {quality === 'ultra' ? '✨ 使用 SAM 2 像素级遮罩' : '⚡ 快速修复'}
-                                    </p>
-                                </div>
-                            </>
-                        )}
-
-                        <div className="options-group" style={{ borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>
-                            <h4>图片尺寸调整</h4>
-                            <div className="sub-mode-selector">
-                                <button
-                                    className={`sub-mode-btn ${resizeMode === 'scale' ? 'active' : ''}`}
-                                    onClick={() => setResizeMode('scale')}
-                                    style={{ padding: '0.5rem', fontSize: '0.85rem' }}
-                                >
-                                    按比例
-                                </button>
-                                <button
-                                    className={`sub-mode-btn ${resizeMode === 'dimension' ? 'active' : ''}`}
-                                    onClick={() => setResizeMode('dimension')}
-                                    style={{ padding: '0.5rem', fontSize: '0.85rem' }}
-                                >
-                                    按像素
-                                </button>
-                            </div>
-
-                            {resizeMode === 'scale' ? (
-                                <div className="brush-size">
-                                    <input
-                                        type="range"
-                                        min="1"
-                                        max="200"
-                                        value={targetScale}
-                                        onChange={(e) => setTargetScale(parseInt(e.target.value))}
-                                    />
-                                    <span className="hint-text">{targetScale}%</span>
-                                </div>
-                            ) : (
-                                <div className="dimension-inputs">
-                                    <div className="input-group">
-                                        <label>宽</label>
-                                        <input
-                                            type="number"
-                                            value={targetWidth}
-                                            onChange={(e) => updateDimension('width', e.target.value)}
+                                {isAiMode ? (
+                                    <div className="image-container preview-surface" style={{ transform: `scale(${zoomScale})`, transformOrigin: 'top center' }}>
+                                        <img
+                                            src={resultImage}
+                                            alt="Current"
+                                            className="preview-image"
                                         />
                                     </div>
-                                    <div className="input-group">
-                                        <label>高</label>
-                                        <input
-                                            type="number"
-                                            value={targetHeight}
-                                            onChange={(e) => updateDimension('height', e.target.value)}
+                                ) : (
+                                    <div className="image-container" style={{ transform: `scale(${zoomScale})`, transformOrigin: 'top center' }}>
+                                        <ImageEditor
+                                            ref={editorRef}
+                                            image={activeFile}
+                                            onProcess={processImageNormal}
+                                            isProcessing={isProcessing}
+                                            brushSize={brushSize}
                                         />
-                                    </div>
-                                    <label className="checkbox-label" style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>
-                                        <input
-                                            type="checkbox"
-                                            checked={lockAspectRatio}
-                                            onChange={(e) => setLockAspectRatio(e.target.checked)}
-                                        /> 锁定长宽比
-                                    </label>
-                                </div>
-                            )}
-
-                            <button className="btn-primary full-width" onClick={handleResize} disabled={isProcessing} style={{ marginTop: '0.5rem' }}>
-                                {isProcessing ? '处理中...' : '应用调整'}
-                            </button>
-                        </div>
-
-                        <div className="action-buttons">
-                            {/* Always show action buttons */}
-                            {isAiMode && (
-                                <button className="btn-primary full-width" onClick={processImageAI} disabled={isProcessing}>
-                                    {isProcessing ? '处理中...' : '开始 AI 去水印'}
-                                </button>
-                            )}
-
-                            {!isAiMode && (
-                                <>
-                                    <button
-                                        className="btn-primary full-width"
-                                        onClick={() => editorRef.current?.handleProcess()}
-                                        disabled={isProcessing}
-                                    >
-                                        {isProcessing ? '处理中...' : '开始去水印'}
-                                    </button>
-                                    <button
-                                        className="btn-secondary full-width"
-                                        onClick={() => editorRef.current?.handleClear()}
-                                    >
-                                        清除涂抹
-                                    </button>
-                                </>
-                            )}
-
-                            <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-                                <button className="btn-primary full-width" onClick={handleDownload} disabled={!resultImage}>
-                                    <Download size={18} style={{ marginRight: '0.5rem' }} />
-                                    下载当前结果
-                                </button>
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <button className="btn-secondary full-width" onClick={revertToOriginal} disabled={!originalImage}>
-                                        恢复原图
-                                    </button>
-                                    <button className="btn-secondary full-width" onClick={resetAll}>
-                                        <RefreshCw size={18} style={{ marginRight: '0.5rem' }} />
-                                        清空
-                                    </button>
-                                </div>
-                                {processingTime && (
-                                    <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.5rem' }}>
-                                        处理耗时: <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{processingTime}</span> ms
                                     </div>
                                 )}
                             </div>
-                        </div>
+                        )}
                     </div>
-                )}
-            </main>
+
+                    {activeFile && (
+                        <div className="right-panel">
+                            <div className="options-group">
+                                <h4>处理模式</h4>
+                                <div className="ai-toggle-wrapper sidebar-toggle">
+                                    <span className={!isAiMode ? 'active' : ''}>基础模式</span>
+                                    <label className="switch">
+                                        <input
+                                            type="checkbox"
+                                            checked={isAiMode}
+                                            onChange={(e) => setIsAiMode(e.target.checked)}
+                                        />
+                                        <span className="slider round"></span>
+                                    </label>
+                                    <span className={isAiMode ? 'active' : ''}>AI 加速</span>
+                                </div>
+                            </div>
+
+                            {!isAiMode && (
+                                <div className="options-group">
+                                    <h4>画笔设置</h4>
+                                    <div className="brush-size">
+                                        <input
+                                            type="range"
+                                            min="5"
+                                            max="100"
+                                            value={brushSize}
+                                            onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                                        />
+                                        <span className="hint-text">{brushSize}px</span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {isAiMode && (
+                                <>
+                                    <div className="options-group">
+                                        <h4>检测算法</h4>
+                                        <div className="sub-mode-selector vertical">
+                                            <button
+                                                className={`sub-mode-btn ${subMode === 'text' ? 'active' : ''}`}
+                                                onClick={() => setSubMode('text')}
+                                            >
+                                                文本检测 (EasyOCR)
+                                            </button>
+                                            <button
+                                                className={`sub-mode-btn ${subMode === 'smart' ? 'active' : ''}`}
+                                                onClick={() => setSubMode('smart')}
+                                            >
+                                                智能检测 (Florence-2)
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="options-group">
+                                        <h4>修复质量</h4>
+                                        <div className="quality-options">
+                                            <button
+                                                className={`quality-btn ${quality === 'standard' ? 'active' : ''}`}
+                                                onClick={() => setQuality('standard')}
+                                            >
+                                                标准
+                                            </button>
+                                            <button
+                                                className={`quality-btn ${quality === 'ultra' ? 'active' : ''}`}
+                                                onClick={() => setQuality('ultra')}
+                                            >
+                                                极致 (SAM 2)
+                                            </button>
+                                        </div>
+                                        <p className="hint-text">
+                                            {quality === 'ultra' ? '✨ 使用 SAM 2 像素级遮罩' : '⚡ 快速修复'}
+                                        </p>
+                                    </div>
+                                </>
+                            )}
+
+                            <div className="options-group" style={{ borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>
+                                <h4>图片尺寸调整</h4>
+                                <div className="sub-mode-selector">
+                                    <button
+                                        className={`sub-mode-btn ${resizeMode === 'scale' ? 'active' : ''}`}
+                                        onClick={() => setResizeMode('scale')}
+                                        style={{ padding: '0.5rem', fontSize: '0.85rem' }}
+                                    >
+                                        按比例
+                                    </button>
+                                    <button
+                                        className={`sub-mode-btn ${resizeMode === 'dimension' ? 'active' : ''}`}
+                                        onClick={() => setResizeMode('dimension')}
+                                        style={{ padding: '0.5rem', fontSize: '0.85rem' }}
+                                    >
+                                        按像素
+                                    </button>
+                                </div>
+
+                                {resizeMode === 'scale' ? (
+                                    <div className="brush-size">
+                                        <input
+                                            type="range"
+                                            min="1"
+                                            max="200"
+                                            value={targetScale}
+                                            onChange={(e) => setTargetScale(parseInt(e.target.value))}
+                                        />
+                                        <span className="hint-text">{targetScale}%</span>
+                                    </div>
+                                ) : (
+                                    <div className="dimension-inputs">
+                                        <div className="input-group">
+                                            <label>宽</label>
+                                            <input
+                                                type="number"
+                                                value={targetWidth}
+                                                onChange={(e) => updateDimension('width', e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="input-group">
+                                            <label>高</label>
+                                            <input
+                                                type="number"
+                                                value={targetHeight}
+                                                onChange={(e) => updateDimension('height', e.target.value)}
+                                            />
+                                        </div>
+                                        <label className="checkbox-label" style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={lockAspectRatio}
+                                                onChange={(e) => setLockAspectRatio(e.target.checked)}
+                                            /> 锁定长宽比
+                                        </label>
+                                    </div>
+                                )}
+
+                                <button className="btn-primary full-width" onClick={handleResize} disabled={isProcessing} style={{ marginTop: '0.5rem' }}>
+                                    {isProcessing ? '处理中...' : '应用调整'}
+                                </button>
+                            </div>
+
+                            <div className="options-group" style={{ borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>
+                                <h4>透明背景</h4>
+                                <p className="hint-text">适合角色立绘、道具图标和小游戏素材导出为透明 PNG。</p>
+                                <button className="btn-secondary full-width" onClick={makeTransparentBackground} disabled={isProcessing}>
+                                    <Layers size={18} style={{ marginRight: '0.5rem' }} />
+                                    {isProcessing ? '处理中...' : '生成透明背景'}
+                                </button>
+                            </div>
+
+                            <div className="action-buttons">
+                                {isAiMode && (
+                                    <button className="btn-primary full-width" onClick={processImageAI} disabled={isProcessing}>
+                                        {isProcessing ? '处理中...' : '开始 AI 去水印'}
+                                    </button>
+                                )}
+
+                                {!isAiMode && (
+                                    <>
+                                        <button
+                                            className="btn-primary full-width"
+                                            onClick={() => editorRef.current?.handleProcess()}
+                                            disabled={isProcessing}
+                                        >
+                                            {isProcessing ? '处理中...' : '开始去水印'}
+                                        </button>
+                                        <button
+                                            className="btn-secondary full-width"
+                                            onClick={() => editorRef.current?.handleClear()}
+                                        >
+                                            清除涂抹
+                                        </button>
+                                    </>
+                                )}
+
+                                <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                                    <button className="btn-primary full-width" onClick={handleDownload} disabled={!resultImage}>
+                                        <Download size={18} style={{ marginRight: '0.5rem' }} />
+                                        下载当前结果
+                                    </button>
+                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <button className="btn-secondary full-width" onClick={revertToOriginal} disabled={!originalImage}>
+                                            恢复原图
+                                        </button>
+                                        <button className="btn-secondary full-width" onClick={resetAll}>
+                                            <RefreshCw size={18} style={{ marginRight: '0.5rem' }} />
+                                            清空
+                                        </button>
+                                    </div>
+                                    {processingTime && (
+                                        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.5rem' }}>
+                                            处理耗时: <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{processingTime}</span> ms
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </main>
+            ) : (
+                <WechatStickerMaker />
+            )}
 
             <footer style={{ marginTop: '4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                 <p>© 2026 Dobby 多比. 由 OpenCV & AI 驱动</p>

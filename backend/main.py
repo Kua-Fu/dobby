@@ -18,7 +18,7 @@ try:
 except (ImportError, AttributeError):
     pass
 
-from processor import remove_watermark, resize_image
+from processor import remove_watermark, resize_image, make_background_transparent
 
 app = FastAPI()
 
@@ -62,6 +62,18 @@ async def resize_image_api(
     
     try:
         result_bytes = resize_image(image_bytes, scale=scale_val, width=width_val, height=height_val)
+        return Response(content=result_bytes, media_type="image/png")
+    except Exception as e:
+        return Response(content=str(e), status_code=500)
+
+@app.post("/make-transparent-background")
+async def make_transparent_background_api(
+    image: UploadFile = File(...)
+):
+    image_bytes = await image.read()
+
+    try:
+        result_bytes = make_background_transparent(image_bytes)
         return Response(content=result_bytes, media_type="image/png")
     except Exception as e:
         return Response(content=str(e), status_code=500)
